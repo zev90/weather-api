@@ -32,7 +32,7 @@ start_time = time.time()
 def log_visit():
     """记录每次API请求"""
     if request.path.startswith("/v1/"):
-        paid = "PAYMENT" in request.headers or "X-402-Payment-Token" in request.headers
+        paid = any(h in request.headers for h in ("PAYMENT-SIGNATURE", "PAYMENT", "X-402-Payment-Token"))
         entry = {
             "time": datetime.now().strftime("%m-%d %H:%M:%S"),
             "ip": request.remote_addr,
@@ -163,7 +163,9 @@ def build_402_response(amount, currency="USDC", chain="base"):
     }
     resp = make_response(jsonify(body), 402)
     resp.headers["Content-Type"] = "application/json"
-    resp.headers["PAYMENT-REQUIRED"] = json.dumps(accepts)
+    resp.headers["PAYMENT-REQUIRED"] = base64.b64encode(json.dumps(accepts).encode()).decode()
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    resp.headers["Access-Control-Expose-Headers"] = "PAYMENT-REQUIRED, PAYMENT-SIGNATURE"
     return resp
 
 
@@ -189,7 +191,7 @@ def require_payment(price_key="single_7d"):
                 return f(*args, **kwargs)
             else:
                 # live模式: x402 v2 标准验证
-                payment_header = request.headers.get("PAYMENT", "")
+                payment_header = request.headers.get("PAYMENT-SIGNATURE", "") or request.headers.get("PAYMENT", "")
                 if not payment_header:
                     return build_402_response(amount)
                 valid, info = verify_x402_payment(payment_header)
