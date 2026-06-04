@@ -157,8 +157,9 @@ def build_402_response(amount, currency="USDC", chain="base"):
             "recipient": RECIPIENT_ADDRESS,
             "facilitator": COINBASE_FACILITATOR,
         },
-        "_dev_note": "Dev mode: use /v1/pay to get a payment token for testing" if X402_MODE == "dev" else None,
     }
+    if X402_MODE == "dev":
+        body["_dev_note"] = "Dev mode: use /v1/pay to get a payment token for testing"
     resp = make_response(jsonify(body), 402)
     resp.headers["Content-Type"] = "application/json"
     resp.headers["X-402-Payment"] = f"amount={amount},currency={currency},chain={chain}"
