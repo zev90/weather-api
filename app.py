@@ -32,7 +32,7 @@ start_time = time.time()
 def log_visit():
     """记录每次API请求"""
     if request.path.startswith("/v1/"):
-        paid = "X-402-Payment-Token" in request.headers
+        paid = "PAYMENT" in request.headers or "X-402-Payment-Token" in request.headers
         entry = {
             "time": datetime.now().strftime("%m-%d %H:%M:%S"),
             "ip": request.remote_addr,
@@ -75,24 +75,32 @@ def dashboard():
 
 # --- 计费配置 ---
 X402_ENABLED = True              # 是否启用付费
-X402_MODE = "dev"                # "dev" 模拟支付 | "live" Coinbase真实支付
+X402_MODE = os.environ.get("X402_MODE", "dev")  # "dev" | "live"
 X402_SECRET = os.environ.get("X402_SECRET", "dev-secret-change-in-production")
 X402_TOKEN_TTL = 300             # 支付token有效期(秒), 5分钟
 
 # 定价表 (USD)
 PRICING = {
-    "single_7d":  0.01,    # 单城市7天预报
-    "single_14d": 0.02,    # 单城市14天预报
-    "multi_batch": 0.05,   # 批量多城市
+    "single_7d":  0.01,
+    "single_14d": 0.02,
+    "multi_batch": 0.05,
 }
 
-# Coinbase x402 facilitator (生产模式使用)
-COINBASE_FACILITATOR = "https://x402.org/facilitator"
+# x402 v2 标准配置
+# USDC on Base: 6 decimals, $0.01 = 10000
+USDC_BASE_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+X402_NETWORK = "eip155:8453"     # Base mainnet (CAIP-2)
+X402_FACILITATOR = "https://api.cdp.coinbase.com/platform/v2/x402"
 RECIPIENT_ADDRESS = os.environ.get("RECIPIENT_ADDRESS", "0x0000000000000000000000000000000000000000")
 
 
+def usd_to_usdc_amount(usd_amount):
+    """$0.01 USD -> 10000 (USDC 6 decimal)"""
+    return str(int(float(usd_amount) * 1_000_000))
+
+
 def generate_payment_token(amount, request_id):
-    """生成支付token (HMAC-SHA256签名)"""
+    """dev模式: 生成模拟支付token"""
     payload = f"{amount}|{request_id}|{int(time.time())}"
     sig = hmac.new(X402_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
     token = base64.b64encode(f"{payload}|{sig}".encode()).decode()
@@ -100,17 +108,15 @@ def generate_payment_token(amount, request_id):
 
 
 def verify_payment_token(token):
-    """验证支付token"""
+    """dev模式: 验证模拟支付token"""
     try:
         decoded = base64.b64decode(token).decode()
         parts = decoded.split("|")
         if len(parts) != 4:
             return False, "invalid token format"
         amount, request_id, ts_str, sig = parts
-        # 检查过期
         if int(time.time()) - int(ts_str) > X402_TOKEN_TTL:
             return False, "token expired"
-        # 验证签名
         payload = f"{amount}|{request_id}|{ts_str}"
         expected = hmac.new(X402_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(expected, sig):
@@ -120,30 +126,49 @@ def verify_payment_token(token):
         return False, "token decode failed"
 
 
+def verify_x402_payment(payment_header):
+    """live模式: 通过CDP facilitator验证支付收据"""
+    try:
+        resp = requests.post(
+            f"{X402_FACILITATOR}/verify",
+            json={"receipt": payment_header},
+            timeout=10
+        )
+        if resp.status_code == 200:
+            return True, resp.json()
+        return False, f"facilitator returned {resp.status_code}"
+    except Exception as e:
+        return False, f"verification failed: {str(e)}"
+
+
 def build_402_response(amount, currency="USDC", chain="base"):
-    """构建 HTTP 402 响应 (x402标准格式)"""
+    """构建 HTTP 402 响应 (x402 v2 标准)"""
+    accepts = [{
+        "scheme": "exact",
+        "network": X402_NETWORK,
+        "amount": usd_to_usdc_amount(amount),
+        "asset": USDC_BASE_ADDRESS,
+        "payTo": RECIPIENT_ADDRESS,
+        "maxTimeoutSeconds": 300,
+        "extra": {
+            "name": currency,
+            "version": "2",
+            "priceDisplay": f"${amount} USD"
+        }
+    }]
     body = {
-        "type": "x402",
-        "title": "Payment Required",
-        "description": f"This API costs ${amount} USD per request. Pay in {currency} on {chain}.",
-        "payment": {
-            "amount": str(amount),
-            "currency": currency,
-            "chain": chain,
-            "network": "base" if chain == "base" else chain,
-            "recipient": RECIPIENT_ADDRESS,
-            "facilitator": COINBASE_FACILITATOR,
-        },
-        "_dev_note": "Dev mode: use /v1/pay to get a payment token for testing" if X402_MODE == "dev" else None,
+        "x402Version": 2,
+        "error": "Payment required",
+        "accepts": accepts,
     }
     resp = make_response(jsonify(body), 402)
     resp.headers["Content-Type"] = "application/json"
-    resp.headers["X-402-Payment"] = f"amount={amount},currency={currency},chain={chain}"
+    resp.headers["PAYMENT-REQUIRED"] = json.dumps(accepts)
     return resp
 
 
 def require_payment(price_key="single_7d"):
-    """x402 付费装饰器: 拦截未付费请求"""
+    """x402 付费装饰器"""
     def decorator(f):
         @wraps(f)
         def wrapper(*args, **kwargs):
@@ -151,18 +176,27 @@ def require_payment(price_key="single_7d"):
                 return f(*args, **kwargs)
 
             amount = PRICING.get(price_key, 0.01)
-            token = request.headers.get("X-402-Payment-Token", "")
 
-            if not token:
-                return build_402_response(amount)
-
-            valid, info = verify_payment_token(token)
-            if not valid:
-                return jsonify({"error": f"Payment verification failed: {info}", "code": "INVALID_TOKEN"}), 402
-
-            # 验证通过，注入支付信息到请求上下文
-            request.x402_payment = info
-            return f(*args, **kwargs)
+            if X402_MODE == "dev":
+                # dev模式: 旧的 HMAC token 方式
+                token = request.headers.get("X-402-Payment-Token", "")
+                if not token:
+                    return build_402_response(amount)
+                valid, info = verify_payment_token(token)
+                if not valid:
+                    return jsonify({"error": f"Payment verification failed: {info}", "code": "INVALID_TOKEN"}), 402
+                request.x402_payment = info
+                return f(*args, **kwargs)
+            else:
+                # live模式: x402 v2 标准验证
+                payment_header = request.headers.get("PAYMENT", "")
+                if not payment_header:
+                    return build_402_response(amount)
+                valid, info = verify_x402_payment(payment_header)
+                if not valid:
+                    return jsonify({"error": f"Payment verification failed: {info}", "code": "INVALID_PAYMENT"}), 402
+                request.x402_payment = info
+                return f(*args, **kwargs)
         return wrapper
     return decorator
 
