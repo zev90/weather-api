@@ -75,7 +75,7 @@ def dashboard():
 
 # --- 计费配置 ---
 X402_ENABLED = True              # 是否启用付费
-X402_MODE = "dev"                # "dev" 模拟支付 | "live" Coinbase真实支付
+X402_MODE = os.environ.get("X402_MODE", "dev")  # "dev" 模拟支付 | "live" Coinbase真实支付
 X402_SECRET = os.environ.get("X402_SECRET", "dev-secret-change-in-production")
 X402_TOKEN_TTL = 300             # 支付token有效期(秒), 5分钟
 
