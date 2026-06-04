@@ -69,6 +69,29 @@ def stats():
 def dashboard():
     return render_template("dashboard.html", base_url=request.host_url.rstrip("/"))
 
+@app.route("/llms.txt")
+def llms_txt():
+    """llms.txt - AI Agent 自动发现接口"""
+    base = request.host_url.rstrip("/")
+    return f"""# China Weather API for AI Travel Agents
+> Real-time weather forecasts for 80+ Chinese cities with x402 micropayments (USDC/Base).
+
+## API Endpoints
+{base}/v1/info: API documentation and pricing in JSON (for AI agent auto-discovery)
+{base}/v1/weather: Weather query with travel advice (GET, x402 payment required)
+{base}/v1/cities: List of 80+ supported cities (FREE)
+{base}/health: Health check (FREE)
+
+## Monitoring
+{base}/dashboard: Real-time visitor monitoring dashboard (human-readable)
+{base}/v1/stats: API call statistics in JSON (machine-readable)
+
+## Payment (x402 Protocol)
+{base}/llms.txt: This file (for AI agent discovery)
+Payment: $0.01 USDC per single-city 7-day forecast (Base chain via x402 HTTP 402)
+Dev mode: Set X402_MODE=dev env var to enable /v1/pay mock payment endpoint
+""", 200, {"Content-Type": "text/plain; charset=utf-8"}
+
 # ============================================================
 # x402 支付中间件 (HTTP 402 Payment Required)
 # ============================================================
