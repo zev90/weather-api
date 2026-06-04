@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta http-equiv="refresh" content="10">
+<title>来访监控 - 天气 API x402</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,sans-serif;background:#0f0f0f;color:#e0e0e0;padding:12px;max-width:480px;margin:0 auto;line-height:1.5;font-size:13px}
+h1{font-size:17px;color:#fff;margin-bottom:2px}
+.sub{color:#888;font-size:11px;margin-bottom:12px}
+.stats{display:flex;gap:8px;margin:10px 0;flex-wrap:wrap}
+.stat-box{flex:1;min-width:70px;background:#1a1a1a;border:1px solid #333;border-radius:8px;padding:10px;text-align:center}
+.stat-num{font-size:22px;font-weight:700;color:#4fc3f7}
+.stat-label{font-size:10px;color:#888;margin-top:2px}
+table{width:100%;border-collapse:collapse;margin:10px 0;font-size:11px}
+th,td{padding:6px 4px;border-bottom:1px solid #222;text-align:left}
+th{color:#666;font-weight:400;font-size:10px}
+.paid{color:#81c784}
+.unpaid{color:#ef9a9a}
+.tag{display:inline-block;padding:1px 5px;border-radius:3px;font-size:9px}
+.tag-paid{background:#1b5e20;color:#81c784}
+.tag-402{background:#b71c1c;color:#ef9a9a}
+.auto{color:#666;font-size:9px;text-align:center;margin-top:10px}
+</style>
+</head>
+<body>
+<h1>📊 来访监控</h1>
+<p class="sub" id="stats"></p>
+<div class="stats">
+<div class="stat-box"><div class="stat-num" id="total">-</div><div class="stat-label">总请求</div></div>
+<div class="stat-box"><div class="stat-num paid" id="paid">-</div><div class="stat-label">已付费</div></div>
+<div class="stat-box"><div class="stat-num unpaid" id="unpaid">-</div><div class="stat-label">402拒绝</div></div>
+</div>
+<table><thead><tr><th>时间</th><th>城市</th><th>状态</th><th>来源</th></tr></thead><tbody id="rows"></tbody></table>
+<p class="auto">每10秒自动刷新 | <a href="/" style="color:#4fc3f7">返回文档</a></p>
+<script>
+fetch('{{ base_url }}/v1/stats').then(r=>r.json()).then(d=>{
+  document.getElementById('stats').textContent = `运行 ${d.uptime} | 查询城市: ${d.cities_queried.join(',')||'无'}`;
+  document.getElementById('total').textContent = d.total_requests;
+  document.getElementById('paid').textContent = d.paid_requests;
+  document.getElementById('unpaid').textContent = d.unpaid_402;
+  let html='';
+  d.recent.forEach(r=>{
+    html+=`<tr><td>${r.time}</td><td>${r.city||'-'}</td>
+    <td><span class="tag ${r.paid?'tag-paid':'tag-402'}">${r.paid?'已付费':'402'}</span></td>
+    <td style="color:#666;font-size:10px;max-width:120px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${r.user_agent.substring(0,30)}</td></tr>`;
+  });
+  document.getElementById('rows').innerHTML=html||'<tr><td colspan="4" style="color:#444;text-align:center">暂无来访</td></tr>';
+});
+</script>
+</body>
+</html>
