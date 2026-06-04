@@ -757,9 +757,10 @@ def list_cities():
 # ============================================================
 
 if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8080))
     print("=" * 60)
     print("  China Weather API for AI Agents")
-    print("  http://127.0.0.1:8080")
+    print(f"  http://0.0.0.0:{port}")
     print("  数据源:", DATA_SOURCE)
     print("=" * 60)
-    app.run(host="0.0.0.0", port=8080, debug=True)
+    app.run(host="0.0.0.0", port=port, debug=False)
