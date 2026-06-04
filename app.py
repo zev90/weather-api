@@ -19,6 +19,24 @@ from flask import Flask, request, jsonify, make_response, render_template
 app = Flask(__name__)
 
 # ============================================================
+# CORS 预检处理 (agentic.market 验证需要)
+# ============================================================
+@app.before_request
+def handle_cors_preflight():
+    if request.method == "OPTIONS":
+        resp = make_response("", 204)
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "*"
+        resp.headers["Access-Control-Max-Age"] = "86400"
+        return resp
+
+@app.after_request
+def add_cors_headers(resp):
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
+
+# ============================================================
 # 来访记录 (Agent调用监控)
 # ============================================================
 from collections import deque
@@ -159,6 +177,11 @@ def build_402_response(amount, currency="USDC", chain="base"):
     body = {
         "x402Version": 2,
         "error": "Payment required",
+        "resource": {
+            "url": "/v1/weather",
+            "description": f"China weather forecast API — ${amount}/call",
+            "mimeType": "application/json"
+        },
         "accepts": accepts,
     }
     resp = make_response(jsonify(body), 402)
