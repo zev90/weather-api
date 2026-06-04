@@ -69,36 +69,13 @@ def stats():
 def dashboard():
     return render_template("dashboard.html", base_url=request.host_url.rstrip("/"))
 
-@app.route("/llms.txt")
-def llms_txt():
-    """llms.txt - AI Agent 自动发现接口"""
-    base = request.host_url.rstrip("/")
-    return f"""# China Weather API for AI Travel Agents
-> Real-time weather forecasts for 80+ Chinese cities with x402 micropayments (USDC/Base).
-
-## API Endpoints
-{base}/v1/info: API documentation and pricing in JSON (for AI agent auto-discovery)
-{base}/v1/weather: Weather query with travel advice (GET, x402 payment required)
-{base}/v1/cities: List of 80+ supported cities (FREE)
-{base}/health: Health check (FREE)
-
-## Monitoring
-{base}/dashboard: Real-time visitor monitoring dashboard (human-readable)
-{base}/v1/stats: API call statistics in JSON (machine-readable)
-
-## Payment (x402 Protocol)
-{base}/llms.txt: This file (for AI agent discovery)
-Payment: $0.01 USDC per single-city 7-day forecast (Base chain via x402 HTTP 402)
-Dev mode: Set X402_MODE=dev env var to enable /v1/pay mock payment endpoint
-""", 200, {"Content-Type": "text/plain; charset=utf-8"}
-
 # ============================================================
 # x402 支付中间件 (HTTP 402 Payment Required)
 # ============================================================
 
 # --- 计费配置 ---
 X402_ENABLED = True              # 是否启用付费
-X402_MODE = os.environ.get("X402_MODE", "dev")  # "dev" 模拟支付 | "live" Coinbase真实支付
+X402_MODE = "dev"                # "dev" 模拟支付 | "live" Coinbase真实支付
 X402_SECRET = os.environ.get("X402_SECRET", "dev-secret-change-in-production")
 X402_TOKEN_TTL = 300             # 支付token有效期(秒), 5分钟
 
@@ -157,9 +134,8 @@ def build_402_response(amount, currency="USDC", chain="base"):
             "recipient": RECIPIENT_ADDRESS,
             "facilitator": COINBASE_FACILITATOR,
         },
+        "_dev_note": "Dev mode: use /v1/pay to get a payment token for testing" if X402_MODE == "dev" else None,
     }
-    if X402_MODE == "dev":
-        body["_dev_note"] = "Dev mode: use /v1/pay to get a payment token for testing"
     resp = make_response(jsonify(body), 402)
     resp.headers["Content-Type"] = "application/json"
     resp.headers["X-402-Payment"] = f"amount={amount},currency={currency},chain={chain}"
@@ -711,6 +687,8 @@ def fetch_qweather(city, days=7):
 
 @app.route("/")
 def index():
+    if X402_MODE == "live":
+        return build_402_response(0.01)
     return render_template("index.html", base_url=request.host_url.rstrip("/"))
 
 @app.route("/deploy")
