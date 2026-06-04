@@ -19,6 +19,57 @@ from flask import Flask, request, jsonify, make_response, render_template
 app = Flask(__name__)
 
 # ============================================================
+# 来访记录 (Agent调用监控)
+# ============================================================
+from collections import deque
+import threading
+
+visit_log = deque(maxlen=100)  # 最近100条来访记录
+visit_lock = threading.Lock()
+start_time = time.time()
+
+@app.before_request
+def log_visit():
+    """记录每次API请求"""
+    if request.path.startswith("/v1/"):
+        paid = "X-402-Payment-Token" in request.headers
+        entry = {
+            "time": datetime.now().strftime("%m-%d %H:%M:%S"),
+            "ip": request.remote_addr,
+            "endpoint": request.path,
+            "method": request.method,
+            "paid": paid,
+            "city": request.args.get("city", ""),
+            "user_agent": (request.headers.get("User-Agent", "") or "")[:80],
+        }
+        with visit_lock:
+            visit_log.appendleft(entry)
+
+@app.route("/v1/stats")
+def stats():
+    """来访记录面板 (手机可看)"""
+    with visit_lock:
+        recent = list(visit_log)[:50]
+    total = len(recent)
+    paid_count = sum(1 for v in recent if v["paid"])
+    cities = list(set(v["city"] for v in recent if v["city"]))
+    uptime = int(time.time() - start_time)
+    h, m = uptime // 3600, (uptime % 3600) // 60
+    return jsonify({
+        "uptime": f"{h}h {m}m",
+        "total_requests": total,
+        "paid_requests": paid_count,
+        "unpaid_402": total - paid_count,
+        "cities_queried": cities,
+        "recent": recent,
+        "tip": "打开 /dashboard 看可视化面板"
+    })
+
+@app.route("/dashboard")
+def dashboard():
+    return render_template("dashboard.html", base_url=request.host_url.rstrip("/"))
+
+# ============================================================
 # x402 支付中间件 (HTTP 402 Payment Required)
 # ============================================================
 
