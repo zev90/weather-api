@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>中国天气 API x402 - 部署指南</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,sans-serif;background:#0f0f0f;color:#e0e0e0;padding:16px;max-width:480px;margin:0 auto;line-height:1.6}
+h1{font-size:20px;color:#fff;margin-bottom:4px}
+h2{font-size:16px;color:#ccc;margin:20px 0 10px;border-bottom:1px solid #333;padding-bottom:6px}
+.card{background:#1a1a1a;border:1px solid #333;border-radius:10px;padding:14px;margin:10px 0}
+.card-title{font-size:14px;font-weight:600;color:#fff;margin-bottom:8px}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;margin:2px}
+.badge-easy{background:#1b5e20;color:#81c784}
+.badge-mid{background:#e65100;color:#ffb74d}
+.badge-pro{background:#4a148c;color:#ce93d8}
+pre{background:#111;border:1px solid #333;border-radius:8px;padding:10px;overflow-x:auto;font-size:11px;margin:8px 0;white-space:pre-wrap;word-break:break-all}
+code{font-family:monospace;font-size:11px;color:#4fc3f7}
+.step-num{display:inline-block;width:20px;height:20px;border-radius:10px;background:#4fc3f7;color:#000;text-align:center;line-height:20px;font-size:11px;font-weight:700;margin-right:6px}
+a{color:#4fc3f7}
+.highlight{background:#1a237e;color:#90caf9;padding:1px 4px;border-radius:3px;font-size:11px}
+</style>
+</head>
+<body>
+
+<h1>🚀 部署到公网</h1>
+<p style="color:#888;font-size:13px;margin-bottom:16px">让全世界 AI Agent 都能调用你的天气 API</p>
+
+<div class="card">
+<div class="card-title"><span class="badge badge-easy">最简单</span> Railway — 5分钟上线</div>
+<p style="font-size:12px;color:#aaa;margin-bottom:8px">无需服务器，免费额度够用</p>
+<p><span class="step-num">1</span> 把 <code>weather_api</code> 文件夹上传到 GitHub 公开仓库</p>
+<p><span class="step-num">2</span> 打开 <a href="https://railway.app">railway.app</a>，用 GitHub 登录</p>
+<p><span class="step-num">3</span> 点 <span class="highlight">New Project</span> → <span class="highlight">Deploy from GitHub repo</span></p>
+<p><span class="step-num">4</span> 选择你的 weather_api 仓库，Railway 自动部署</p>
+<p><span class="step-num">5</span> 部署完成后会得到域名如 <code>weather-api.up.railway.app</code></p>
+<pre><code># 验证部署成功
+curl https://你的域名.up.railway.app/health
+# → {"status":"ok"}
+
+# AI Agent 调用
+curl https://你的域名.up.railway.app/v1/weather?city=张家界
+# → HTTP 402 + 支付信息</code></pre>
+</div>
+
+<div class="card">
+<div class="card-title"><span class="badge badge-mid">中等</span> Render — 自动HTTPS</div>
+<p style="font-size:12px;color:#aaa;margin-bottom:8px">免费计划，自动免费SSL证书</p>
+<p><span class="step-num">1</span> 注册 <a href="https://render.com">render.com</a></p>
+<p><span class="step-num">2</span> <span class="highlight">New Web Service</span> → 连接 GitHub 仓库</p>
+<p><span class="step-num">3</span> 设置：Runtime <code>Python 3</code>，Build <code>pip install -r requirements.txt</code>，Start <code>python app.py</code></p>
+<p><span class="step-num">4</span> 环境变量添加 <code>PORT=10000</code>（Render 自动分配端口）</p>
+</div>
+
+<div class="card">
+<div class="card-title"><span class="badge badge-pro">专业</span> 自有VPS — 完全掌控</div>
+<p style="font-size:12px;color:#aaa;margin-bottom:8px">阿里云/腾讯云/任何Linux服务器</p>
+<pre><code># SSH 登录服务器后执行
+git clone 你的仓库地址
+cd weather_api
+bash deploy.sh</code></pre>
+<p style="font-size:12px;color:#aaa">然后用 nginx 反向代理 8080 端口到 80/443</p>
+</div>
+
+<div class="card">
+<div class="card-title">📦 上传到 GitHub (必须)</div>
+<p style="font-size:12px;color:#aaa">Railway 和 Render 都需要 GitHub，先打包上传：</p>
+<pre><code># 在 weather_api 目录下已有这些文件：
+app.py              # 主程序 + x402中间件
+requirements.txt    # Python依赖
+start.sh           # 启动脚本
+templates/         # HTML文档页面
+test_x402_flow.py  # 端到端测试
+demo_agent_flow.py # Agent视角演示
+deploy.sh          # 一键部署</code></pre>
+<p style="font-size:12px;color:#aaa;margin-top:8px">把整个 <code>weather_api</code> 文件夹 push 到 GitHub 新建仓库即可。</p>
+</div>
+
+<div class="card">
+<div class="card-title">✅ 部署后验证</div>
+<pre><code># 1. 健康检查
+curl https://你的域名/health
+
+# 2. 无支付请求 (应返回402)
+curl https://你的域名/v1/weather?city=张家界
+
+# 3. 模拟支付获取token
+curl -X POST https://你的域名/v1/pay \
+  -H "Content-Type: application/json" \
+  -d '{"amount":0.01}'
+
+# 4. 带token获取数据
+curl -H "X-402-Payment-Token: 你的TOKEN" \
+  "https://你的域名/v1/weather?city=张家界"</code></pre>
+</div>
+
+<div class="card">
+<div class="card-title">🔐 切换到真实支付 (可选)</div>
+<p style="font-size:12px;color:#aaa">部署成功后，在 Railway/Render 的环境变量里设置：</p>
+<pre><code>X402_MODE=live
+X402_SECRET=你的随机密钥
+RECIPIENT_ADDRESS=0x你的Coinbase钱包地址</code></pre>
+</div>
+
+<p style="text-align:center;color:#555;font-size:12px;margin:30px 0">
+Railway 推荐首选 — 免配置、自动扩缩、免费额度
+</p>
+
+</body>
+</html>
