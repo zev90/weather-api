@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>中国天气 API x402 - AI Agent 专用</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f0f0f;color:#e0e0e0;padding:16px;max-width:480px;margin:0 auto;line-height:1.6}
+h1{font-size:20px;color:#fff;margin-bottom:4px}
+h2{font-size:16px;color:#ccc;margin:20px 0 10px;padding-bottom:6px;border-bottom:1px solid #333}
+h3{font-size:14px;color:#aaa;margin:14px 0 6px}
+pre{background:#1a1a1a;border:1px solid #333;border-radius:8px;padding:12px;overflow-x:auto;font-size:12px;margin:8px 0;white-space:pre-wrap;word-break:break-all}
+code{font-family:'SF Mono',monospace;font-size:12px;color:#4fc3f7}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;margin:2px}
+.badge-get{background:#1b5e20;color:#81c784}
+.badge-post{background:#0d47a1;color:#64b5f6}
+.badge-402{background:#b71c1c;color:#ef9a9a}
+.badge-price{background:#4a148c;color:#ce93d8}
+.card{background:#1a1a1a;border:1px solid #333;border-radius:10px;padding:14px;margin:10px 0}
+.card-title{font-size:14px;font-weight:600;color:#fff;margin-bottom:6px}
+.step{position:relative;padding-left:28px;margin:12px 0}
+.step-num{position:absolute;left:0;top:0;width:22px;height:22px;border-radius:11px;background:#4fc3f7;color:#000;text-align:center;line-height:22px;font-size:12px;font-weight:700}
+.flow-arrow{text-align:center;color:#666;margin:4px 0}
+table{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}
+th,td{padding:8px 6px;border:1px solid #333;text-align:left}
+th{background:#1a1a1a;color:#aaa;font-weight:500}
+.status-ok{color:#81c784}
+.status-deny{color:#ef9a9a}
+</style>
+</head>
+<body>
+
+<h1>🔗 中国天气 API x402</h1>
+<p style="color:#888;font-size:13px">为 AI 旅游规划 Agent 设计的付费天气接口</p>
+
+<!-- 快速开始 -->
+<h2>快速验证 (30秒)</h2>
+<div class="card">
+<div class="card-title">curl 一键走完整流程</div>
+<pre><code># 1. 无支付请求 → 402
+curl -s {{ base_url }}/v1/weather?city=张家界&days=3
+
+# 2. 模拟支付获取 token
+curl -s -X POST {{ base_url }}/v1/pay \
+  -H "Content-Type: application/json" \
+  -d '{"amount":0.01}'
+
+# 3. 带 token 重试 (复制上一步的 token)
+curl -s -H "X-402-Payment-Token: 你的TOKEN" \
+  "{{ base_url }}/v1/weather?city=张家界&days=3"</code></pre>
+</div>
+
+<!-- API 端点 -->
+<h2>API 端点</h2>
+
+<table>
+<tr><th>端点</th><th>方式</th><th>付费</th><th>说明</th></tr>
+<tr><td><code>/v1/weather</code></td><td><span class="badge badge-get">GET</span></td><td><span class="badge badge-price">$0.01</span></td><td>城市天气预报 + 旅游建议</td></tr>
+<tr><td><code>/v1/pay</code></td><td><span class="badge badge-post">POST</span></td><td>免费</td><td>模拟支付获取 token (dev)</td></tr>
+<tr><td><code>/v1/cities</code></td><td><span class="badge badge-get">GET</span></td><td>免费</td><td>支持的城市列表 (76个)</td></tr>
+<tr><td><code>/health</code></td><td><span class="badge badge-get">GET</span></td><td>免费</td><td>服务健康检查</td></tr>
+</table>
+
+<h3>天气查询参数</h3>
+<table>
+<tr><th>参数</th><th>类型</th><th>必填</th><th>说明</th></tr>
+<tr><td>city</td><td>string</td><td>是</td><td>城市名 (中文)</td></tr>
+<tr><td>days</td><td>int</td><td>否</td><td>预报天数 1-14 (默认7)</td></tr>
+</table>
+
+<!-- 定价 -->
+<h2>定价</h2>
+<table>
+<tr><th>方案</th><th>价格</th><th>说明</th></tr>
+<tr><td>单城市 7 天</td><td><span class="badge badge-price">$0.01</span></td><td>基础查询</td></tr>
+<tr><td>单城市 14 天</td><td><span class="badge badge-price">$0.02</span></td><td>深度预报</td></tr>
+<tr><td>多城市批量</td><td><span class="badge badge-price">$0.05</span></td><td>行程规划</td></tr>
+</table>
+
+<!-- 完整交互流程图 -->
+<h2>Agent 交互流程</h2>
+
+<div class="step"><div class="step-num">1</div>
+<strong>Agent 发现 API</strong><br>
+<span style="color:#888">GET / → 获取服务信息和定价</span>
+</div>
+<div class="flow-arrow">▼</div>
+
+<div class="step"><div class="step-num">2</div>
+<strong>无支付请求 → HTTP 402</strong>
+<pre><code><span class="status-deny">HTTP 402 Payment Required</span>
+{
+  "type": "x402",
+  "payment": {
+    "amount": "0.01",
+    "currency": "USDC",
+    "chain": "base",
+    "facilitator": "https://x402.org/facilitator"
+  }
+}</code></pre>
+</div>
+<div class="flow-arrow">▼</div>
+
+<div class="step"><div class="step-num">3</div>
+<strong>Agent 付款获取 Token</strong>
+<pre><code>POST /v1/pay
+→ {"payment_token": "eyJ...", "amount": "0.01"}</code></pre>
+</div>
+<div class="flow-arrow">▼</div>
+
+<div class="step"><div class="step-num">4</div>
+<strong>带 Token 重试 → 获取数据</strong>
+<pre><code><span class="status-ok">HTTP 200 OK</span>
+{
+  "city": "张家界",
+  "forecast": [
+    {"date":"2026-06-04", "weather":"Sunny",
+     "temp_high":33, "temp_low":18,
+     "travel_advice": ["天气良好，适宜出行"]}
+  ]
+}</code></pre>
+</div>
+
+<!-- 部署 -->
+<h2>部署步骤</h2>
+
+<div class="card">
+<div class="card-title">方案A: Railway (最简单，5分钟)</div>
+<ol style="font-size:13px;padding-left:18px;color:#aaa">
+<li>访问 <a href="https://railway.app" style="color:#4fc3f7">railway.app</a> 用 GitHub 登录</li>
+<li>New Project → Deploy from GitHub repo</li>
+<li>把 weather_api 文件夹 push 到 GitHub</li>
+<li>添加 start.sh 为启动命令</li>
+<li>自动获得公网域名</li>
+</ol>
+</div>
+
+<div class="card">
+<div class="card-title">方案B: 任何 VPS</div>
+<pre><code>cd weather_api
+pip install -r requirements.txt
+# 修改 X402_MODE = "live"
+# 设置 export RECIPIENT_ADDRESS=你的钱包地址
+nohup python app.py &
+# 用 nginx 反向代理 8080 端口</code></pre>
+</div>
+
+<h2>切换到真实支付</h2>
+<div class="card" style="border-color:#4a148c">
+修改 <code>app.py</code> 开头两行：
+<pre><code>X402_MODE = "live"                          # 改为 live
+X402_SECRET = "你的强随机密钥"               # 改为随机串
+RECIPIENT_ADDRESS = "0x你的Coinbase钱包地址"  # 真实地址</code></pre>
+然后 <code>/v1/pay</code> 端点自动禁用，Agent 需走 Coinbase x402 facilitator 完成真实 USDC 支付。
+</div>
+
+<h2>测试脚本</h2>
+<div class="card">
+<pre><code># 完整端到端测试
+python test_x402_flow.py
+
+# Agent视角演示
+python demo_agent_flow.py</code></pre>
+</div>
+
+<p style="text-align:center;color:#555;font-size:12px;margin-top:30px;padding-bottom:20px">
+Powered by Flask + x402 Protocol | wttr.in 数据源
+</p>
+</body>
+</html>
