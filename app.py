@@ -260,6 +260,12 @@ def build_402_response(amount, currency="USDC", chain="base"):
     if req_args.get("city"):
         bazaar_ext = bazaar_resource_server_extension(bazaar_ext, req_args)
 
+    # x402 协议要求 http 类型资源 URL 必须以 https:// 开头
+    # Railway 等 PaaS 使用 TLS 终止，request.host_url 可能返回 http://
+    scheme = "https"
+    host = request.host
+    base_url = f"{scheme}://{host}"
+
     body = {
         "x402Version": 2,
         "error": (
@@ -267,7 +273,7 @@ def build_402_response(amount, currency="USDC", chain="base"):
             "See extensions.bazaar for endpoint discovery metadata."
         ),
         "resource": {
-            "url": f"{request.host_url.rstrip('/')}/v1/weather",
+            "url": f"{base_url}/v1/weather",
             "description": f"China weather forecast API — ${amount}/call",
             "mimeType": "application/json",
         },
