@@ -15,6 +15,7 @@ import os
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import Flask, request, jsonify, make_response, render_template
+from x402_extensions import declare_discovery_extension, bazaar_resource_server_extension
 
 app = Flask(__name__)
 
@@ -111,6 +112,59 @@ X402_NETWORK = "eip155:8453"     # Base mainnet (CAIP-2)
 X402_FACILITATOR = "https://api.cdp.coinbase.com/platform/v2/x402"
 RECIPIENT_ADDRESS = os.environ.get("RECIPIENT_ADDRESS", "0x0000000000000000000000000000000000000000")
 
+# --- Bazaar Discovery Extension 配置 (agentic.market 发现用) ---
+WEATHER_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "city": {
+            "type": "string",
+            "description": "城市名称 (中文/pinyin/English)",
+        },
+        "days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 14,
+            "description": "预报天数, 默认7",
+        },
+        "travel": {
+            "type": "boolean",
+            "description": "是否附带旅游建议, 默认true",
+        },
+        "format": {
+            "type": "string",
+            "enum": ["json", "html"],
+            "description": "输出格式, 默认json",
+        },
+    },
+    "required": ["city"],
+}
+
+WEATHER_OUTPUT_EXAMPLE = {
+    "city": "张家界",
+    "country": "China",
+    "timezone": "Asia/Shanghai",
+    "forecast": [
+        {
+            "date": "2026-06-06",
+            "weather": "Patchy rain possible",
+            "temp_high": 28,
+            "temp_low": 19,
+            "humidity": 72,
+            "wind_speed_kmh": 10,
+            "uv_index": 6,
+            "visibility_km": 10,
+            "travel_advice": [
+                "小雨不影响游览，天子山云雾缭绕别有风味"
+            ],
+            "clothing": [
+                "短袖+薄长裤",
+                "薄外套（早晚用）",
+                "雨伞/雨衣",
+            ],
+        }
+    ],
+}
+
 
 def usd_to_usdc_amount(usd_amount):
     """$0.01 USD -> 10000 (USDC 6 decimal)"""
@@ -160,7 +214,7 @@ def verify_x402_payment(payment_header):
 
 
 def build_402_response(amount, currency="USDC", chain="base"):
-    """构建 HTTP 402 响应 (x402 v2 标准)"""
+    """构建 HTTP 402 响应 (x402 v2 标准, 含 Bazaar 发现扩展)"""
     accepts = [{
         "scheme": "exact",
         "network": X402_NETWORK,
@@ -174,22 +228,62 @@ def build_402_response(amount, currency="USDC", chain="base"):
             "priceDisplay": f"${amount} USD"
         }
     }]
+
+    # --- 构建 Bazaar Discovery Extension (agentic.market 自动索引需要) ---
+    req_args = {
+        "city": request.args.get("city", ""),
+        "days": request.args.get("days", "7"),
+        "travel": request.args.get("travel", "true"),
+        "format": request.args.get("format", "json"),
+    }
+    bazaar_ext = declare_discovery_extension(
+        input_data={"city": "张家界", "days": 7, "travel": True},
+        input_schema=WEATHER_INPUT_SCHEMA,
+        output={
+            "example": WEATHER_OUTPUT_EXAMPLE,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "city": {"type": "string"},
+                    "country": {"type": "string"},
+                    "timezone": {"type": "string"},
+                    "forecast": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                    },
+                },
+            },
+        },
+        description="中国城市天气预报 + 旅游建议，专为AI旅游规划Agent设计",
+    )
+    # 用本次请求的实际参数丰富示例 (bazaarResourceServerExtension 模式)
+    if req_args.get("city"):
+        bazaar_ext = bazaar_resource_server_extension(bazaar_ext, req_args)
+
     body = {
         "x402Version": 2,
-        "error": "PAYMENT-SIGNATURE header is required",
+        "error": (
+            "PAYMENT-SIGNATURE header is required. "
+            "See extensions.bazaar for endpoint discovery metadata."
+        ),
         "resource": {
             "url": f"{request.host_url.rstrip('/')}/v1/weather",
             "description": f"China weather forecast API — ${amount}/call",
-            "mimeType": "application/json"
+            "mimeType": "application/json",
         },
         "accepts": accepts,
-        "extensions": {},
+        "extensions": bazaar_ext,
     }
     resp = make_response(jsonify(body), 402)
     resp.headers["Content-Type"] = "application/json"
-    resp.headers["PAYMENT-REQUIRED"] = base64.b64encode(json.dumps(body).encode()).decode()
+    # PAYMENT-REQUIRED header (x402 v2 标准, base64 编码的完整 body)
+    resp.headers["PAYMENT-REQUIRED"] = base64.b64encode(
+        json.dumps(body, ensure_ascii=False).encode()
+    ).decode()
     resp.headers["Access-Control-Allow-Origin"] = "*"
-    resp.headers["Access-Control-Expose-Headers"] = "PAYMENT-REQUIRED, PAYMENT-SIGNATURE"
+    resp.headers["Access-Control-Expose-Headers"] = (
+        "PAYMENT-REQUIRED, PAYMENT-SIGNATURE"
+    )
     return resp
 
 

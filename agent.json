@@ -1,0 +1,74 @@
+{
+  "schema": "https://agentic.market/schema/agent-v1.json",
+  "name": "China Weather API",
+  "description": "中国城市天气预报 + 旅游建议 API，专为 AI 旅游规划 Agent 设计。覆盖 80+ 中国城市/景点，提供温度、湿度、风速、紫外线等详细气象数据，以及基于景点特征的个性化旅游建议和穿衣建议。",
+  "url": "https://your-app.railway.app",
+  "version": "1.0.0",
+  "category": "data",
+  "tags": ["weather", "china", "travel", "tourism", "chinese-cities", "x402"],
+  "pricing": {
+    "type": "pay_per_call",
+    "description": "每次 API 调用按 USDC 微支付计费",
+    "plans": [
+      {
+        "name": "Single City 7-Day Forecast",
+        "price_usd": 0.01,
+        "price_display": "$0.01 USD",
+        "description": "单个城市 7 天天气预报 + 旅游建议"
+      },
+      {
+        "name": "Single City 14-Day Forecast",
+        "price_usd": 0.02,
+        "price_display": "$0.02 USD",
+        "description": "单个城市 14 天详细预报"
+      },
+      {
+        "name": "Multi-City Batch",
+        "price_usd": 0.05,
+        "price_display": "$0.05 USD",
+        "description": "一次行程的多个城市批量查询"
+      }
+    ]
+  },
+  "x402": {
+    "version": 2,
+    "network": "eip155:8453",
+    "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "asset_symbol": "USDC",
+    "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402"
+  },
+  "endpoints": [
+    {
+      "path": "/v1/weather",
+      "method": "GET",
+      "description": "获取指定城市的天气预报和旅游建议",
+      "parameters": [
+        {"name": "city", "type": "string", "required": true, "description": "城市名称（中文/拼音/英文）"},
+        {"name": "days", "type": "integer", "required": false, "default": 7, "description": "预报天数 1-14"},
+        {"name": "travel", "type": "boolean", "required": false, "default": true, "description": "是否附带旅游建议"},
+        {"name": "format", "type": "string", "required": false, "default": "json", "enum": ["json", "html"]}
+      ],
+      "x402_payment": {
+        "price_key": "single_7d",
+        "price_usd": 0.01
+      }
+    },
+    {
+      "path": "/v1/cities",
+      "method": "GET",
+      "description": "列出所有支持的城市",
+      "parameters": [],
+      "x402_payment": null
+    },
+    {
+      "path": "/v1/info",
+      "method": "GET",
+      "description": "获取 API 服务信息和使用说明",
+      "parameters": [],
+      "x402_payment": null
+    }
+  ],
+  "languages": ["zh-CN", "en"],
+  "data_sources": ["wttr.in"],
+  "coverage": "主要覆盖中国 80+ 城市和旅游景点"
+}
