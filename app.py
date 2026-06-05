@@ -176,17 +176,18 @@ def build_402_response(amount, currency="USDC", chain="base"):
     }]
     body = {
         "x402Version": 2,
-        "error": "Payment required",
+        "error": "PAYMENT-SIGNATURE header is required",
         "resource": {
-            "url": "/v1/weather",
+            "url": f"{request.host_url.rstrip('/')}/v1/weather",
             "description": f"China weather forecast API — ${amount}/call",
             "mimeType": "application/json"
         },
         "accepts": accepts,
+        "extensions": {},
     }
     resp = make_response(jsonify(body), 402)
     resp.headers["Content-Type"] = "application/json"
-    resp.headers["PAYMENT-REQUIRED"] = base64.b64encode(json.dumps(accepts).encode()).decode()
+    resp.headers["PAYMENT-REQUIRED"] = base64.b64encode(json.dumps(body).encode()).decode()
     resp.headers["Access-Control-Allow-Origin"] = "*"
     resp.headers["Access-Control-Expose-Headers"] = "PAYMENT-REQUIRED, PAYMENT-SIGNATURE"
     return resp
