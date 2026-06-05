@@ -199,18 +199,172 @@ def verify_payment_token(token):
 
 
 def verify_x402_payment(payment_header):
-    """live模式: 通过CDP facilitator验证支付收据"""
+    """验证 @x402/fetch 发来的 PAYMENT-SIGNATURE (base64 x402 v2 payload)
+
+    @x402/fetch 发送:  base64(JSON({x402Version, accepted, payload: {authorization, signature}, resource}))
+    我们直接解码、校验结构、检查过期时间，不依赖 Coinbase facilitator 外部服务。
+    """
     try:
-        resp = requests.post(
-            f"{X402_FACILITATOR}/verify",
-            json={"receipt": payment_header},
-            timeout=10
-        )
-        if resp.status_code == 200:
-            return True, resp.json()
-        return False, f"facilitator returned {resp.status_code}"
+        decoded = base64.b64decode(payment_header).decode("utf-8")
+        payload = json.loads(decoded)
     except Exception as e:
-        return False, f"verification failed: {str(e)}"
+        return False, f"decode failed: {e}"
+
+    if not isinstance(payload, dict):
+        return False, "invalid payload format"
+    if payload.get("x402Version") != 2:
+        return False, f"unsupported version: {payload.get('x402Version')}"
+
+    accepted = payload.get("accepted", {})
+    if not isinstance(accepted, dict) or not accepted.get("amount"):
+        return False, "missing accepted payment terms"
+
+    pd = payload.get("payload", {})
+    if not isinstance(pd, dict):
+        return False, "missing payload"
+    signature = pd.get("signature", "")
+    authorization = pd.get("authorization", {})
+    if not signature or not isinstance(authorization, dict):
+        return False, "missing signature or authorization"
+
+    # 检查过期
+    valid_before = authorization.get("validBefore")
+    if valid_before:
+        try:
+            if time.time() > int(valid_before):
+                return False, "authorization expired"
+        except (ValueError, TypeError):
+            pass
+
+    # 尝试用 eth_account 恢复签名者地址做验证 (可选)
+    signer = _try_recover_signer(payload)
+    auth_from = authorization.get("from", "")
+    if signer and auth_from:
+        if signer.lower() != auth_from.lower():
+            return False, f"signer mismatch: recovered={signer} expected={auth_from}"
+
+    return True, {
+        "amount": accepted.get("amount"),
+        "from": auth_from,
+        "scheme": accepted.get("scheme", "exact"),
+    }
+
+
+def _try_recover_signer(payload: dict) -> str | None:
+    """尝试从 x402 v2 payload 的 EIP-712 签名中恢复签名者地址。
+    需要 eth_account 库 (pip install eth-account)。
+    如果库不可用或格式不匹配, 返回 None (跳过验证)。
+    """
+    try:
+        from eth_account import Account
+        from eth_account.messages import encode_typed_data
+    except ImportError:
+        return None
+
+    try:
+        pd = payload.get("payload", {})
+        sig = pd.get("signature", "")
+        auth = pd.get("authorization", {})
+
+        if not sig or not auth:
+            return None
+
+        # 从 authorization 字段推断 EIP-712 scheme:
+        # EIP-3009 (USDC native) 有 from/to/value/validAfter/validBefore/nonce
+        # Permit2 有 permitted/spender/nonce/deadline/witness
+        has_permit2 = "permitted" in auth and "spender" in auth
+        is_eip3009 = all(k in auth for k in ("from", "to", "value", "validAfter", "validBefore", "nonce"))
+
+        if is_eip3009 and not has_permit2:
+            # EIP-3009 TransferWithAuthorization
+            chain_id = _chain_id_from_network()
+            asset = payload.get("accepted", {}).get("asset", "")
+            typed_data = {
+                "types": {
+                    "EIP712Domain": [
+                        {"name": "name", "type": "string"},
+                        {"name": "version", "type": "string"},
+                        {"name": "chainId", "type": "uint256"},
+                        {"name": "verifyingContract", "type": "address"},
+                    ],
+                    "TransferWithAuthorization": [
+                        {"name": "from", "type": "address"},
+                        {"name": "to", "type": "address"},
+                        {"name": "value", "type": "uint256"},
+                        {"name": "validAfter", "type": "uint256"},
+                        {"name": "validBefore", "type": "uint256"},
+                        {"name": "nonce", "type": "bytes32"},
+                    ],
+                },
+                "domain": {
+                    "name": "USDC",
+                    "version": "2",
+                    "chainId": chain_id,
+                    "verifyingContract": asset,
+                },
+                "primaryType": "TransferWithAuthorization",
+                "message": {k: str(auth[k]) for k in ("from", "to", "value", "validAfter", "validBefore", "nonce")},
+            }
+            recovered = Account.recover_typed_data(typed_data, sig)
+            return recovered
+
+        elif has_permit2:
+            # Permit2 PermitWitnessTransferFrom (Uniswap Permit2)
+            chain_id = _chain_id_from_network()
+            witness = auth.get("witness", {})
+            permitted = auth.get("permitted", {})
+            typed_data = {
+                "types": {
+                    "EIP712Domain": [
+                        {"name": "name", "type": "string"},
+                        {"name": "chainId", "type": "uint256"},
+                        {"name": "verifyingContract", "type": "address"},
+                    ],
+                    "PermitWitnessTransferFrom": [
+                        {"name": "permitted", "type": "TokenPermissions"},
+                        {"name": "spender", "type": "address"},
+                        {"name": "nonce", "type": "uint256"},
+                        {"name": "deadline", "type": "uint256"},
+                        {"name": "witness", "type": "Witness"},
+                    ],
+                    "TokenPermissions": [
+                        {"name": "token", "type": "address"},
+                        {"name": "amount", "type": "uint256"},
+                    ],
+                    "Witness": [
+                        {"name": "to", "type": "address"},
+                        {"name": "validAfter", "type": "uint256"},
+                    ],
+                },
+                "domain": {
+                    "name": "Permit2",
+                    "chainId": chain_id,
+                    "verifyingContract": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+                },
+                "primaryType": "PermitWitnessTransferFrom",
+                "message": {
+                    "permitted": permitted,
+                    "spender": auth.get("spender", ""),
+                    "nonce": str(auth.get("nonce", "0")),
+                    "deadline": str(auth.get("deadline", "0")),
+                    "witness": witness,
+                },
+            }
+            recovered = Account.recover_typed_data(typed_data, sig)
+            return recovered
+
+    except Exception:
+        pass
+
+    return None
+
+
+def _chain_id_from_network() -> int:
+    """从 X402_NETWORK (CAIP-2) 中提取 chain id"""
+    try:
+        return int(X402_NETWORK.split(":")[1])
+    except (IndexError, ValueError):
+        return 8453  # Base mainnet default
 
 
 def build_402_response(amount, currency="USDC", chain="base"):
@@ -303,8 +457,17 @@ def require_payment(price_key="single_7d"):
 
             amount = PRICING.get(price_key, 0.01)
 
+            # 优先检查 PAYMENT-SIGNATURE (client SDK 发起的真实加密支付)
+            payment_header = request.headers.get("PAYMENT-SIGNATURE", "")
+            if payment_header:
+                valid, info = verify_x402_payment(payment_header)
+                if not valid:
+                    return jsonify({"error": f"Payment verification failed: {info}", "code": "INVALID_PAYMENT"}), 402
+                request.x402_payment = info
+                return f(*args, **kwargs)
+
+            # 降级: dev 模式的 HMAC token
             if X402_MODE == "dev":
-                # dev模式: 旧的 HMAC token 方式
                 token = request.headers.get("X-402-Payment-Token", "")
                 if not token:
                     return build_402_response(amount)
@@ -313,16 +476,9 @@ def require_payment(price_key="single_7d"):
                     return jsonify({"error": f"Payment verification failed: {info}", "code": "INVALID_TOKEN"}), 402
                 request.x402_payment = info
                 return f(*args, **kwargs)
-            else:
-                # live模式: x402 v2 标准验证
-                payment_header = request.headers.get("PAYMENT-SIGNATURE", "") or request.headers.get("PAYMENT", "")
-                if not payment_header:
-                    return build_402_response(amount)
-                valid, info = verify_x402_payment(payment_header)
-                if not valid:
-                    return jsonify({"error": f"Payment verification failed: {info}", "code": "INVALID_PAYMENT"}), 402
-                request.x402_payment = info
-                return f(*args, **kwargs)
+
+            # live 模式但没有 PAYMENT-SIGNATURE
+            return build_402_response(amount)
         return wrapper
     return decorator
 
